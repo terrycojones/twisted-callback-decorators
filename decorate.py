@@ -83,3 +83,5 @@ def errback(func):
         else:
             return succeed(args[0])
     return wrapper
+
+__all__ = ['callback', 'errback']
