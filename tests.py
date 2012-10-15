@@ -2,7 +2,7 @@ from operator import add
 from twisted.internet.defer import inlineCallbacks, fail, succeed
 from twisted.python.failure import Failure
 from twisted.trial.unittest import TestCase
-from decorate import callback, errback
+from decorate import callback, errback, ErrbackDecoratorError
 
 
 @errback
@@ -160,6 +160,53 @@ class TestDecorators(TestCase):
         d = failingChecker(Failure(RuntimeError('oops')))
         return self.failUnlessFailure(d, RuntimeError)
 
+    def testErrbackCalledWithNoPositionalArg(self):
+        """
+        An errback called with no positional arg must raise
+        L{ErrbackDecoratorError}.
+        """
+        @errback
+        def checker(args):
+            # The following raise will not happen, as the wrapper detects
+            # the no-positional-arg call and raises ErrbackDecoratorError
+            raise Exception()
+        d = checker()
+        return self.failUnlessFailure(d, ErrbackDecoratorError)
+
+    @inlineCallbacks
+    def testErrbackDecoratorErrorExceptionText(self):
+        """
+        L{ErrbackDecoratorError} failures should have error messages that
+        indicate what went wrong, including naming the wrapped function.
+        """
+        @errback
+        def checkMessage(failure):
+            self.assertEqual("@errback decorated function 'checkerFunc' "
+                             "invoked with no positional arguments.",
+                             failure.value.args[0])
+            return 10
+
+        @errback
+        def checkerFunc(args):
+            # The following raise will not happen, as the wrapper detects
+            # the no-positional-arg call and raises ErrbackDecoratorError
+            raise Exception()
+        result = yield checkMessage(checkerFunc())
+        self.assertEqual(10, result)
+
+    def testErrbackCalledWithNoPositionalArgButAKeywordArg(self):
+        """
+        An errback called with no positional arg (but a keyword arg) must raise
+        L{ErrbackDecoratorError}.
+        """
+        @errback
+        def checker(args):
+            # The following raise will not happen, as the wrapper detects
+            # the no-positional-arg call and raises ErrbackDecoratorError
+            raise Exception()
+        d = checker(arg=None)
+        return self.failUnlessFailure(d, ErrbackDecoratorError)
+
     @inlineCallbacks
     def testErrbackRecovery(self):
         """An errback function must be able to return a non-error result."""
@@ -228,6 +275,7 @@ class TestDecorators(TestCase):
         @errback
         def checker(failure):
             raise Exception('Inconceivable')
+
         @callback
         def multiAdd(*args):
             return reduce(add, args, 0)
@@ -235,3 +283,27 @@ class TestDecorators(TestCase):
                                 checker(multiAdd(succeed(2), succeed(3), 4)),
                                 checker(multiAdd(succeed(5), succeed(6), 7)))
         self.assertEqual(28, result)
+
+    def testErrbackPassedAFailureAndAnArg(self):
+        """An errback receiving a C{Failure} and an arg must be called."""
+        @errback
+        def checker(failure, arg):
+            return failure
+
+        @callback
+        def cb(result):
+            raise Exception('Inconceivable')
+        d = cb(checker(Failure(RuntimeError('oops')), 3))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedAnArgAndAFailure(self):
+        """An errback receiving an arg and a C{Failure} must be called."""
+        @errback
+        def checker(arg, failure):
+            return failure
+
+        @callback
+        def cb(result):
+            raise Exception('Inconceivable')
+        d = cb(checker(3, Failure(RuntimeError('oops'))))
+        return self.failUnlessFailure(d, RuntimeError)

@@ -1,6 +1,7 @@
 from functools import wraps
 from twisted.internet.defer import (
-    Deferred, DeferredList, maybeDeferred, succeed)
+    Deferred, DeferredList, fail, maybeDeferred, succeed)
+from twisted.python.failure import Failure
 
 
 def _replace(value, location, args):
@@ -45,6 +46,13 @@ def callback(func):
     return wrapper
 
 
+class ErrbackDecoratorError(Exception):
+    """
+    Raised if a function decorated with L{errback} is called with no
+    positional arguments.
+    """
+
+
 def errback(func):
     """
     A decorator that turns a regular function into one that can accept
@@ -58,6 +66,10 @@ def errback(func):
     """
     @wraps(func)
     def wrapper(*args, **kw):
+        if not args:
+            return fail(ErrbackDecoratorError(
+                '@errback decorated function %r invoked with '
+                'no positional arguments.' % wrapper.__name__))
         fargs = []
         fkw = {}
         deferreds = []
@@ -73,13 +85,18 @@ def errback(func):
             else:
                 fkw[key] = arg
         if deferreds:
-            def finish(results):
-                if all(success for success, result in results):
-                    return succeed(fargs[0])
+            def finish(ignore):
+                if any(isinstance(v, Failure) for v in fargs + fkw.values()):
+                    return func(*fargs, **fkw)
                 else:
-                    return maybeDeferred(func, *fargs, **fkw)
+                    return fargs[0]
             return DeferredList(deferreds, consumeErrors=True).addCallback(
                 finish)
         else:
-            return succeed(args[0])
+            if any(isinstance(v, Failure) for v in fargs + fkw.values()):
+                return maybeDeferred(func, *fargs, **fkw)
+            else:
+                return succeed(fargs[0])
     return wrapper
+
+__all__ = ['callback', 'errback', 'ErrbackDecoratorError']
