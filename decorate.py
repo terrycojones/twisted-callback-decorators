@@ -99,4 +99,5 @@ def errback(func):
                 return succeed(fargs[0])
     return wrapper
 
+
 __all__ = ['callback', 'errback', 'ErrbackDecoratorError']
