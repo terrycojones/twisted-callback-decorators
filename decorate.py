@@ -35,12 +35,14 @@ def callback(func):
             else:
                 fkw[key] = arg
         if deferreds:
-            def getSubFailure(failure):
-                return failure.value.subFailure
-            return DeferredList(
-                deferreds, fireOnOneErrback=True, consumeErrors=True
-            ).addCallbacks(callback=lambda _: func(*fargs, **fkw),
-                           errback=getSubFailure)
+            if len(deferreds) == 1:
+                return deferreds[0].addCallback(lambda _: func(*fargs, **fkw))
+            else:
+                return DeferredList(
+                    deferreds, fireOnOneErrback=True, consumeErrors=True
+                ).addCallbacks(
+                    lambda _: func(*fargs, **fkw),
+                    errback=lambda failure: failure.value.subFailure)
         else:
             return maybeDeferred(func, *args, **kw)
     return wrapper
@@ -90,8 +92,11 @@ def errback(func):
                     return func(*fargs, **fkw)
                 else:
                     return fargs[0]
-            return DeferredList(deferreds, consumeErrors=True).addCallback(
-                finish)
+            if len(deferreds) == 1:
+                return deferreds[0].addBoth(finish)
+            else:
+                return DeferredList(deferreds, consumeErrors=True).addCallback(
+                    finish)
         else:
             if any(isinstance(v, Failure) for v in fargs + fkw.values()):
                 return maybeDeferred(func, *fargs, **fkw)

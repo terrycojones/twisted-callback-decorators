@@ -208,8 +208,26 @@ class TestDecorators(TestCase):
         return self.failUnlessFailure(d, ErrbackDecoratorError)
 
     @inlineCallbacks
-    def testErrbackRecovery(self):
-        """An errback function must be able to return a non-error result."""
+    def testErrbackRecoveryWithNonDeferredArgs(self):
+        """
+        An errback function must return its first arg when none of its
+        args are C{Deferred}s.
+        """
+        @errback
+        def checker(arg1, arg2):
+            # The following raise will not happen, as the wrapper detects
+            # that no arguments are Failures and does not call the wrapped
+            # function.
+            raise(Exception)
+        result = yield checker(3, 4)
+        self.assertEqual(3, result)
+
+    @inlineCallbacks
+    def testErrbackRecoveryWithDeferredArg(self):
+        """
+        An errback function must be able to return a non-error result when
+        one of its args is a C{Deferred}.
+        """
         result = yield adder(3, twoArgChecker(
             adder(3, fail(Exception('oops'))), 12))
         self.assertEqual(15, result)
@@ -306,4 +324,71 @@ class TestDecorators(TestCase):
         def cb(result):
             raise Exception('Inconceivable')
         d = cb(checker(3, Failure(RuntimeError('oops'))))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedTwoDeferredsBothFail(self):
+        """An errback must handle multiple failing C{Deferred} args."""
+        @errback
+        def checker(failure1, failure2):
+            self.assertTrue(isinstance(failure1, Failure))
+            self.assertTrue(isinstance(failure2, Failure))
+            return failure1
+
+        d = checker(fail(RuntimeError('oops')), fail(Exception('oops')))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedTwoDeferredsFirstFails(self):
+        """
+        An errback must handle multiple C{Deferred} args, the first of which
+        fails.
+        """
+        @errback
+        def checker(failure1, failure2):
+            self.assertTrue(isinstance(failure1, Failure))
+            self.assertEqual(5, failure2)
+            return failure1
+
+        d = checker(fail(RuntimeError('oops')), succeed(5))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedTwoDeferredsSecondFails(self):
+        """
+        An errback must handle multiple C{Deferred} args, the second of which
+        fails.
+        """
+        @errback
+        def checker(failure1, failure2):
+            self.assertEqual(5, failure1)
+            self.assertTrue(isinstance(failure2, Failure))
+            return failure2
+
+        d = checker(succeed(5), fail(RuntimeError('oops')))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedTwoDeferredsOneAsAKeywordFirstFails(self):
+        """
+        An errback must handle multiple C{Deferred} args, including one that
+        is a keyword argument, in which the positional C{Deferred} fails.
+        """
+        @errback
+        def checker(failure1, failure2=None):
+            self.assertTrue(isinstance(failure1, Failure))
+            self.assertEqual(5, failure2)
+            return failure1
+
+        d = checker(fail(RuntimeError('oops')), failure2=succeed(5))
+        return self.failUnlessFailure(d, RuntimeError)
+
+    def testErrbackPassedTwoDeferredsOneAsAKeywordSecondFails(self):
+        """
+        An errback must handle multiple C{Deferred} args, including one that
+        is a keyword argument, in which the keyword C{Deferred} fails.
+        """
+        @errback
+        def checker(failure1, failure2=None):
+            self.assertEqual(5, failure1)
+            self.assertTrue(isinstance(failure2, Failure))
+            return failure2
+
+        d = checker(succeed(5), failure2=fail(RuntimeError('oops')))
         return self.failUnlessFailure(d, RuntimeError)
