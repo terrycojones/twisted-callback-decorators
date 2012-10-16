@@ -1,5 +1,5 @@
 from operator import add
-from twisted.internet.defer import inlineCallbacks, fail, succeed
+from twisted.internet.defer import Deferred, fail, inlineCallbacks, succeed
 from twisted.python.failure import Failure
 from twisted.trial.unittest import TestCase
 from decorate import callback, errback, ErrbackDecoratorError
@@ -145,6 +145,34 @@ class TestDecorators(TestCase):
         d = adder(3, fail(RuntimeError('oops')))
         return self.failUnlessFailure(d, RuntimeError)
 
+    @inlineCallbacks
+    def testCallbackFailureWithMultipleDeferredArgsCallsCancel(self):
+        """
+        A callback must fail if one of several C{Deferred} arguments fails,
+        and it must cancel all outstanding deferreds.
+        """
+        uncalled1 = Deferred()
+        uncalled2 = Deferred()
+
+        @errback
+        def checker(failure):
+            self.assertTrue(isinstance(failure.value, RuntimeError))
+            # The other Deferreds received by the callback must have
+            # been cancelled by the @callback decorator.
+            self.assertTrue(uncalled1.called)
+            self.assertTrue(uncalled2.called)
+            return 5
+
+        @callback
+        def cb(arg1, arg2, arg3=None):
+            # The following raise will not happen, as the wrapper detects
+            # the failed argument and does not call the wrapped function.
+            raise Exception()
+
+        result = yield checker(cb(fail(RuntimeError('oops')),
+                                  uncalled1, arg3=uncalled2))
+        self.assertEqual(5, result)
+
     def testRaisingChecker(self):
         """An errback function must fail if it raises an error."""
         d = raisingChecker(fail(RuntimeError('oops')))
@@ -170,6 +198,7 @@ class TestDecorators(TestCase):
             # The following raise will not happen, as the wrapper detects
             # the no-positional-arg call and raises ErrbackDecoratorError
             raise Exception()
+
         d = checker()
         return self.failUnlessFailure(d, ErrbackDecoratorError)
 
@@ -191,6 +220,7 @@ class TestDecorators(TestCase):
             # The following raise will not happen, as the wrapper detects
             # the no-positional-arg call and raises ErrbackDecoratorError
             raise Exception()
+
         result = yield checkMessage(checkerFunc())
         self.assertEqual(10, result)
 
@@ -204,6 +234,7 @@ class TestDecorators(TestCase):
             # The following raise will not happen, as the wrapper detects
             # the no-positional-arg call and raises ErrbackDecoratorError
             raise Exception()
+
         d = checker(arg=None)
         return self.failUnlessFailure(d, ErrbackDecoratorError)
 
@@ -219,6 +250,7 @@ class TestDecorators(TestCase):
             # that no arguments are Failures and does not call the wrapped
             # function.
             raise(Exception)
+
         result = yield checker(3, 4)
         self.assertEqual(3, result)
 
@@ -263,6 +295,7 @@ class TestDecorators(TestCase):
         @errback
         def checker(failure):
             raise Exception('Inconceivable')
+
         result = yield checker(adder(3, 4))
         self.assertEqual(7, result)
 
@@ -272,6 +305,7 @@ class TestDecorators(TestCase):
         @errback
         def checker(failure):
             raise Exception('Inconceivable')
+
         result = yield checker(checker(adder(3, 4)))
         self.assertEqual(7, result)
 
@@ -281,6 +315,7 @@ class TestDecorators(TestCase):
         @errback
         def checker(failure):
             raise Exception('Inconceivable')
+
         result = yield adder(1,
                              adder(
                                  checker(adder(succeed(2), succeed(3))),
@@ -297,6 +332,7 @@ class TestDecorators(TestCase):
         @callback
         def multiAdd(*args):
             return reduce(add, args, 0)
+
         result = yield multiAdd(1,
                                 checker(multiAdd(succeed(2), succeed(3), 4)),
                                 checker(multiAdd(succeed(5), succeed(6), 7)))
@@ -311,6 +347,7 @@ class TestDecorators(TestCase):
         @callback
         def cb(result):
             raise Exception('Inconceivable')
+
         d = cb(checker(Failure(RuntimeError('oops')), 3))
         return self.failUnlessFailure(d, RuntimeError)
 
@@ -323,6 +360,7 @@ class TestDecorators(TestCase):
         @callback
         def cb(result):
             raise Exception('Inconceivable')
+
         d = cb(checker(3, Failure(RuntimeError('oops'))))
         return self.failUnlessFailure(d, RuntimeError)
 

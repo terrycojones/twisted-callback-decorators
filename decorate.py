@@ -38,11 +38,14 @@ def callback(func):
             if len(deferreds) == 1:
                 return deferreds[0].addCallback(lambda _: func(*fargs, **fkw))
             else:
+                def canceler(result):
+                    for i, deferred in enumerate(deferreds):
+                        if i != result.value.index:
+                            deferred.cancel()
+                    return result.value.subFailure
                 return DeferredList(
                     deferreds, fireOnOneErrback=True, consumeErrors=True
-                ).addCallbacks(
-                    lambda _: func(*fargs, **fkw),
-                    errback=lambda failure: failure.value.subFailure)
+                ).addCallbacks(lambda _: func(*fargs, **fkw), errback=canceler)
         else:
             return maybeDeferred(func, *args, **kw)
     return wrapper
